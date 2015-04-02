@@ -1,0 +1,366 @@
+﻿Exportfile for AOT version 1.0 or later
+Formatversion: 1
+
+***Element: CLS
+
+; Microsoft Dynamics AX Class: sch_FixInvCostZeroQty выгружен
+; --------------------------------------------------------------------------------
+  CLSVERSION 1
+  
+  CLASS #sch_FixInvCostZeroQty
+    PROPERTIES
+      Name                #sch_FixInvCostZeroQty
+      Extends             #
+      RunOn               #Called from
+    ENDPROPERTIES
+    
+    METHODS
+      Version: 3
+      SOURCE #chechInventDimFlag
+        #boolean chechInventDimFlag()
+        #{
+        #    boolean         ret = true;
+        #    InventDimParm   inventDimParm;
+        #    ;
+        #
+        #    inventDimParm = InventDimParm::activeDimFlag(inventTable.DimGroupId);
+        #
+        #    if (inventDimParm.InventLocationIdFlag && !inventDim.InventLocationId)
+        #        ret = checkFailed("Invent dimension Location empty, but active for item!");
+        #
+        #    if (inventDimParm.InventBatchIdFlag && !inventDim.inventBatchId)
+        #        ret = checkFailed("Invent dimension Batch empty, but active for item!");
+        #
+        #    return ret;
+        #}
+      ENDSOURCE
+      SOURCE #chechInventTransOpen
+        #boolean chechInventTransOpen()
+        #{
+        #    InventTrans     inventTrans;
+        #    ;
+        #
+        #    select firstonly recId from inventTrans
+        #        where inventTrans.ItemId      == itemId      &&
+        #              inventTrans.inventDimId == inventDimId &&
+        #              inventTrans.ValueOpen   == InventTransOpen::Yes;
+        #
+        #    return !inventTrans.RecId;
+        #
+        #}
+      ENDSOURCE
+      SOURCE #checkFixInventSum
+        #void checkFixInventSum()
+        #{
+        #    InventSumReCalcItem     inventSumReCalcItem;
+        #    ;
+        #
+        #    inventSumReCalcItem = new InventSumReCalcItem(itemId, false, CheckFix::Fix);
+        #    inventSumReCalcItem.updateNow();
+        #
+        #}
+      ENDSOURCE
+      SOURCE #checkParam
+        #boolean checkParam()
+        #{
+        #    boolean ret = true;
+        #    ;
+        #
+        #    if (ret && !this.chechInventDimFlag())
+        #        ret = checkFailed(strFmt("Correction is not possible!"));
+        #
+        #    if(ret && !this.chechInventTransOpen())
+        #        ret = checkFailed(strFmt("Have open invent trans! Correction is not possible!"));
+        #
+        #    if (ret && postedQty)
+        #        ret = checkFailed(strFmt("InventSum is not equal to 0. Correction is not possible!", postedQty));
+        #
+        #    if (ret && postedAmount == 0)
+        #        ret = checkFailed(strFmt("Invent cost equal 0. Correction is not possible!"));
+        #
+        #    return ret;
+        #}
+      ENDSOURCE
+      SOURCE #classDeclaration
+        #class sch_FixInvCostZeroQty
+        #{
+        #    ItemId          itemId;
+        #    InventTable     inventTable;
+        #    InventDimId     inventDimId;
+        #    InventDim       inventDim;
+        #
+        #    TransDate       fixDate;
+        #    Qty             fixQty;
+        #
+        #    LedgerAccount   offsetAccount;
+        #
+        #    CostAmount      postedAmount;
+        #    Qty             postedQty;
+        #    CostAmount      costForReceive; //default 0.01 Delta for cost receive
+        #
+        #    NoYes           fixInventSum; // Run standart fix function
+        #
+        #    JournalId       receiveJournalId;
+        #    JournalId       issueJournalId;
+        #}
+      ENDSOURCE
+      SOURCE #closeInventTrans
+        #void closeInventTrans()
+        #{
+        #    InventTrans     inventTrans, inventTransUpd;
+        #    ;
+        #
+        #    while select inventTrans
+        #        where inventTrans.ItemId      == itemId      &&
+        #              inventTrans.inventDimId == inventDimId &&
+        #              inventTrans.ValueOpen   == InventTransOpen::Yes
+        #    {
+        #        ttsbegin;
+        #
+        #            inventTransUpd                   = inventTrans::findRecId(inventTrans.RecId, true);
+        #            inventTransUpd.ValueOpen         = InventTransOpen::No;
+        #            inventTransUpd.DateClosed        = inventTrans.DateFinancial;
+        #            inventTransUpd.QtySettled        = inventTrans.Qty;
+        #            inventTransUpd.CostAmountSettled = inventTrans.CostAmountPosted + inventTrans.CostAmountAdjustment;
+        #            inventTransUpd.doUpdate();
+        #
+        #        ttscommit;
+        #    }
+        #}
+      ENDSOURCE
+      SOURCE #createJournalTable
+        #InventJournalTable createJournalTable(Qty _fixQty)
+        #{
+        #    InventJournalTable  inventJournalTable;
+        #    JournalTableData    journalTableData = JournalTableData::newTable(inventJournalTable);
+        #    ;
+        #
+        #    inventJournalTable.JournalId     = journalTableData.nextJournalId();
+        #    inventJournalTable.JournalType   = InventJournalType::Movement;
+        #    inventJournalTable.JournalNameId = journalTableData.journalStatic().standardJournalNameId(inventJournalTable.JournalType);
+        #
+        #    journalTableData.initFromJournalName(journalTableData.journalStatic().findJournalName(inventJournalTable.JournalNameId));
+        #
+        #    if (_fixQty > 0)
+        #        inventJournalTable.Description          = strFmt("Correction inventSum dimension %1 receipt", inventDimId);
+        #    else
+        #        inventJournalTable.Description          = strFmt("Correction inventSum dimension %1 issue", inventDimId);
+        #
+        #    inventJournalTable.insert();
+        #
+        #    return inventJournalTable;
+        #}
+      ENDSOURCE
+      SOURCE #createJurnalTrans
+        #void createJurnalTrans(InventJournalTable _inventJournalTable, Qty _fixQty)
+        #{
+        #    InventJournalTrans  inventJournalTrans;
+        #    JournalTableData    journalTableData;
+        #    JournalTransData    journalTransData;
+        #    ;
+        #
+        #    journalTableData = JournalTableData::newTable(_inventJournalTable);
+        #
+        #    inventJournalTrans.clear();
+        #    inventJournalTrans.initValue();
+        #    inventJournalTrans.initFromInventJournalTable(_inventJournalTable);
+        #    inventJournalTrans.initFromInventTable(inventTable);
+        #    inventJournalTrans.TransDate   = fixDate;
+        #    inventJournalTrans.inventMovement().setInventDimId(inventDimId);
+        #    inventJournalTrans.Qty         = _fixQty;
+        #    inventJournalTrans.inventMovement().journalSetQty();
+        #
+        #    if (inventJournalTrans.Qty > 0)
+        #    {
+        #        if (postedAmount > 0)
+        #            inventJournalTrans.CostPrice = costForReceive;
+        #        else
+        #            inventJournalTrans.CostPrice = -postedAmount + costForReceive;
+        #    }
+        #
+        #    inventJournalTrans.inventMovement().journalSetCostPrice();
+        #
+        #    inventJournalTrans.LedgerAccountIdOffset = offsetAccount;
+        #
+        #    //Set Dimension if need
+        #
+        #    journalTransData = journalTableData.journalStatic().newJournalTransData(inventJournalTrans, journalTableData);
+        #    journalTransData.insert();
+        #
+        #    if (inventJournalTrans.Qty < 0)
+        #        this.inventPicked(inventJournalTrans);
+        #
+        #    journalTableData.updateBlock(JournalBlockLevel::None,JournalBlockLevel::None);
+        #}
+      ENDSOURCE
+      SOURCE #createPostJournal
+        #JournalId createPostJournal(Qty _fixQty)
+        #{
+        #    InventJournalTable  inventJournalTable;
+        #    ;
+        #
+        #    inventJournalTable = this.createJournalTable(_fixQty);
+        #
+        #    this.createJurnalTrans(inventJournalTable, _fixQty);
+        #
+        #    this.journalPost(inventJournalTable);
+        #
+        #    return inventJournalTable.JournalId;
+        #}
+      ENDSOURCE
+      SOURCE #fix
+        #void fix()
+        #{
+        #    boolean doFix;
+        #    ;
+        #
+        #    inventTable = InventTable::find(itemId);
+        #    inventDim   = InventDim::find(inventDimId);
+        #
+        #    this.inventOnHand();
+        #
+        #    if (!this.checkParam())
+        #        throw error("Error in param!");
+        #
+        #    ttsbegin;
+        #
+        #    if (fixInventSum == NoYes::Yes)
+        #    {
+        #        this.checkFixInventSum();
+        #        this.inventOnHand();
+        #    }
+        #
+        #    if (postedAmount)
+        #    {
+        #        receiveJournalId = this.createPostJournal(fixQty);
+        #        issueJournalId   = this.createPostJournal(-fixQty);
+        #        doFix = true;
+        #    }
+        #
+        #    this.inventOnHand();
+        #
+        #    if (postedAmount)
+        #        throw error("Correction via Invent Move journal not zeroud cost, operation canceled.");
+        #
+        #    if (doFix)
+        #        this.closeInventTrans();
+        #
+        #    ttscommit;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #inventOnHand
+        #void inventOnHand()
+        #{
+        #    InventOnHand    inventOnHand;
+        #    ;
+        #
+        #    inventOnhand = new InventOnhand();
+        #    inventOnhand.parmItemId(itemId);
+        #    inventOnhand.parmInventDimId(inventDimId);
+        #
+        #    postedQty    = inventOnhand.postedQty();
+        #    postedAmount = inventOnHand.postedValue();
+        #
+        #    return;
+        #}
+      ENDSOURCE
+      SOURCE #inventPicked
+        #void inventPicked(InventJournalTrans _inventJournalTrans)
+        #{
+        #    InventUpd_Picked    inventPicked;
+        #    InventMovement      movement;
+        #    InventDimParm       inventDimParm;
+        #    ;
+        #
+        #    movement = _inventJournalTrans.inventMovement();
+        #    inventDimParm.initPhysicalUpdate(movement.dimGroupId());
+        #    inventPicked = InventUpd_Picked::newParameters(movement, inventDim, inventDimParm, inventDim, inventDimParm, _inventJournalTrans.Qty);
+        #    inventPicked.updateNow();
+        #}
+      ENDSOURCE
+      SOURCE #journalPost
+        #void journalPost(InventJournalTable _inventJournalTable)
+        #{
+        #    JournalCheckPost    journalCheckPost;
+        #    ;
+        #
+        #    journalCheckPost = InventJournalCheckPost::newPostJournal(_inventJournalTable);
+        #    journalCheckPost.run();
+        #
+        #}
+      ENDSOURCE
+      SOURCE #parmCostForReceive
+        #public CostAmount parmCostForReceive(CostAmount _costForReceive = costForReceive)
+        #{
+        #    ;
+        #    costForReceive = _costForReceive;
+        #
+        #    return costForReceive;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #parmFixDate
+        #public TransDate parmFixDate(TransDate _fixDate = fixDate)
+        #{
+        #    ;
+        #    fixDate = _fixDate;
+        #
+        #    return fixDate;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #parmFixInventSum
+        #public NoYes parmFixInventSum(NoYes _fixInventSum = fixInventSum)
+        #{
+        #    ;
+        #    fixInventSum = _fixInventSum;
+        #
+        #    return fixInventSum;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #parmFixQty
+        #public Qty parmFixQty(Qty _fixQty = fixQty)
+        #{
+        #    ;
+        #    fixQty = _fixQty;
+        #
+        #    return fixQty;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #parmInventDimId
+        #public InventDimId parmInventDimId(InventDimId _inventDimId = inventDimId)
+        #{
+        #    ;
+        #    inventDimId = _inventDimId;
+        #
+        #    return inventDimId;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #parmItemId
+        #public ItemId parmItemId(ItemId _itemId = itemId)
+        #{
+        #    ;
+        #    itemId = _itemId;
+        #
+        #    return itemId;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #parmOffsetAccount
+        #public LedgerAccount parmOffsetAccount(LedgerAccount _offsetAccount = offsetAccount)
+        #{
+        #    ;
+        #    offsetAccount = _offsetAccount;
+        #
+        #    return offsetAccount;
+        #}
+        #
+      ENDSOURCE
+    ENDMETHODS
+  ENDCLASS
+
+***Element: END
