@@ -1,0 +1,6 @@
+
+    InventSumReCalcItem     inventSumReCalcItem;
+    ;
+
+    inventSumReCalcItem = new InventSumReCalcItem(itemId, false, CheckFix::Fix);
+    inventSumReCalcItem.updateNow();
