@@ -1,0 +1,453 @@
+﻿Exportfile for AOT version 1.0 or later
+Formatversion: 1
+
+***Element: CLS
+
+; Microsoft Dynamics AX Class: SCH_FTPClient выгружен
+; --------------------------------------------------------------------------------
+  CLSVERSION 1
+  
+  CLASS #SCH_FTPClient
+    PROPERTIES
+      Name                #SCH_FTPClient
+      Extends             #
+      RunOn               #Called from
+    ENDPROPERTIES
+    
+    METHODS
+      Version: 3
+      SOURCE #classDeclaration
+        #class SCH_FTPClient
+        #{
+        #    str     mainFtpURL;
+        #    str     login;
+        #    str     password;
+        #    str     fileType;
+        #    str     destFolder; //Destination folder read or write
+        #
+        #    System.Net.FtpWebResponse       ftpWebresponse;
+        #    System.Net.NetworkCredential    credential;
+        #    System.Net.WebClient            webClient;
+        #
+        #    Map     files;
+        #}
+      ENDSOURCE
+      SOURCE #createReader
+        #System.IO.StreamReader createReader(System.Net.FtpWebRequest _ftpWebRequest)
+        #{
+        #    System.IO.StreamReader      reader;
+        #    System.Net.FtpWebResponse   response;
+        #    ;
+        #
+        #    response = _ftpWebRequest.GetResponse();
+        #    reader   = new System.IO.StreamReader(response.GetResponseStream());
+        #
+        #    return reader;
+        #}
+      ENDSOURCE
+      SOURCE #createWebRequest
+        #System.Net.FtpWebRequest createWebRequest(str _ftpURL)
+        #{
+        #    Object                      obj;
+        #    System.Net.FtpWebRequest    ftpWebRequest;
+        #    ;
+        #
+        #    obj           = System.Net.WebRequest::Create(_ftpURL);
+        #    ftpWebRequest = obj;
+        #
+        #    ftpWebRequest.set_KeepAlive(false);
+        #    ftpWebRequest.set_UsePassive(true);
+        #    ftpWebRequest.set_Credentials(new System.Net.NetworkCredential(login, password));
+        #
+        #    return ftpWebRequest;
+        #}
+      ENDSOURCE
+      SOURCE #delFile
+        #void delFile(Notes _fileName)
+        #{
+        #    System.Net.FtpWebRequest    ftpWebRequest;
+        #    System.Net.FtpWebResponse   response;
+        #    int                         i;
+        #    ;
+        #
+        #    new InteropPermission(InteropKind::ClrInterop).assert();
+        #
+        #    try
+        #    {
+        #        ftpWebRequest = this.createWebRequest(this.fullFileURL(_fileName));
+        #        ftpWebRequest.set_Method(SCH_FTPClient::getMethodDeleteFile());
+        #
+        #        response = ftpWebRequest.GetResponse();
+        #
+        #        response.Close();
+        #        ftpWebRequest.Abort();
+        #    }
+        #    catch (exception::CLRError)
+        #    {
+        #        if (i >= 10)
+        #            warning(strFmt("File %1 %2", _fileName, AifUtil::getClrErrorMessage()));
+        #        else
+        #        {   sleep(1000);
+        #            i++;
+        #            retry;
+        #        }
+        #    }
+        #
+        #    new InteropPermission(InteropKind::ClrInterop).demand();
+        #
+        #    return;
+        #}
+      ENDSOURCE
+      SOURCE #fullFileURL
+        #str fullFileURL(Notes _fileName)
+        #{
+        #    str fileFtpUrl;
+        #    ;
+        #
+        #        if (destFolder)
+        #            fileFtpUrl = mainFtpURL + destFolder + "/" +_fileName;
+        #        else
+        #            fileFtpUrl = mainFtpURL +_fileName;
+        #
+        #    return fileFtpUrl;
+        #
+        #}
+      ENDSOURCE
+      SOURCE #getFileInStr
+        #Notes getFileInStr(Notes _fileName)
+        #{
+        #    System.IO.StreamReader      reader;
+        #    System.Net.FtpWebRequest    ftpWebRequest;
+        #    System.String               netString;
+        #    Notes                       fileInStr;
+        #    int                         i;
+        #    int64                       ftpSize, localSize;
+        #    System.Text.Encoding        ecoding;
+        #    ;
+        #
+        #    new InteropPermission(InteropKind::ClrInterop).assert();
+        #
+        #    try
+        #    {
+        #        ftpWebRequest = this.createWebRequest(this.fullFileURL(_fileName));
+        #        ftpWebRequest.set_Method(SCH_FTPClient::getMethodDounloadFile());
+        #
+        #        reader    = this.createReader(ftpWebRequest);
+        #        ecoding   = reader.get_CurrentEncoding();
+        #        netString = reader.ReadToEnd();
+        #        fileInStr = netString.ToString();
+        #
+        #        ftpSize   = this.sizeFile(_fileName);
+        #        localSize = ecoding.GetByteCount(netString);
+        #
+        #        if (ftpSize != localSize)
+        #        {
+        #            error(strFmt("Size origin file %1 = %2 does not match with received data in size %3", _fileName, ftpSize, strLen(fileInStr) ));
+        #            throw Exception::Error;
+        #        }
+        #
+        #        reader.Close();
+        #        ecoding   = null;
+        #        netString = null;
+        #        ftpWebRequest.Abort();
+        #
+        #    }
+        #    catch (Exception::CLRError)
+        #    {
+        #        if (i >= 10)
+        #            warning(strFmt("File %1 %2", _fileName, AifUtil::getClrErrorMessage()));
+        #        else
+        #        {   sleep(1000);
+        #            i++;
+        #            retry;
+        #        }
+        #    }
+        #    catch (Exception::Error)
+        #    {
+        #        if (reader)        reader.Close();
+        #        if (ftpWebRequest) ftpWebRequest.Abort();
+        #        fileInStr = "";
+        #        warning(strFmt("The file %1 was not loaded!", _fileName));
+        #    }
+        #
+        #
+        #    new InteropPermission(InteropKind::ClrInterop).demand();
+        #
+        #    return fileInStr;
+        #}
+      ENDSOURCE
+      SOURCE #getFilesList
+        #Map getFilesList()
+        #{
+        #    System.IO.StreamReader      reader;
+        #    System.Net.FtpWebRequest    ftpWebRequest;
+        #    System.String               netString;
+        #    Notes                       fileName;
+        #    ;
+        #
+        #    new InteropPermission(InteropKind::ClrInterop).assert();
+        #
+        #    try
+        #    {
+        #        ftpWebRequest = this.createWebRequest(mainFtpURL + destFolder);
+        #
+        #        ftpWebRequest.set_Method(SCH_FTPClient::getMethodShortListFiles());
+        #
+        #        reader   = this.createReader(ftpWebRequest);
+        #
+        #        do
+        #        {
+        #            netString = reader.ReadLine();
+        #            fileName  = netString.ToString();
+        #
+        #            if (destFolder)
+        #                fileName = strDel(fileName,1, strlen(destFolder)+1); //Del destination folder in file name
+        #
+        #            if (fileName == "" || fileName == "." || fileName == "..")
+        #                continue;
+        #
+        #            if (fileType && strScan(fileName, fileType, 1, strLen(fileName)) == 0) // if set file extension then search in file name
+        #                continue;
+        #
+        #            if (!files.exists(fileName))
+        #                files.insert(fileName, connull());
+        #
+        #        } while (!reader.get_EndOfStream());
+        #    }
+        #    catch (exception::CLRError)
+        #    {
+        #        error(AifUtil::getClrErrorMessage());
+        #    }
+        #
+        #    if (reader != null)
+        #        reader.Close();
+        #
+        #    new InteropPermission(InteropKind::ClrInterop).demand();
+        #
+        #    return files;
+        #}
+      ENDSOURCE
+      SOURCE #new
+        #void new()
+        #{
+        #    ;
+        #    //Key - name; Type - container with xml string
+        #    files = new Map(Types::String, Types::Container);
+        #}
+      ENDSOURCE
+      SOURCE #parmDestFolder
+        #public Str parmDestFolder(Str _destFolder = destFolder)
+        #{
+        #    ;
+        #    destFolder = _destFolder;
+        #
+        #    return destFolder;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #parmFiles
+        #public Map parmFiles(Map _files = files)
+        #{
+        #    ;
+        #    files = _files;
+        #
+        #    return files;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #parmFileType
+        #public Str parmFileType(Str _fileType = fileType)
+        #{
+        #    ;
+        #    fileType = _fileType;
+        #
+        #    return fileType;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #parmLogin
+        #public Str parmLogin(Str _login = login)
+        #{
+        #    ;
+        #    login = _login;
+        #
+        #    return login;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #parmMainFtpURL
+        #public Str parmMainFtpURL(Str _mainFtpURL = mainFtpURL)
+        #{
+        #    ;
+        #    mainFtpURL = _mainFtpURL;
+        #
+        #    return mainFtpURL;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #parmPassword
+        #public Str parmPassword(Str _password = password)
+        #{
+        #    ;
+        #    password = _password;
+        #
+        #    return password;
+        #}
+        #
+      ENDSOURCE
+      SOURCE #putFileFromStr
+        #void putFileFromStr(Notes _file, Notes _fileName)
+        #{
+        #    System.Net.FtpWebRequest    ftpWebRequest;
+        #    int                         i;
+        #    int64                       ftpSize, localSize;
+        #    System.Byte[]               bytes;
+        #    System.Text.Encoding        utf8;
+        #    System.IO.Stream            requestStream;
+        #    ;
+        #
+        #    new InteropPermission(InteropKind::ClrInterop).assert();
+        #
+        #    try
+        #    {
+        #        utf8  = System.Text.Encoding::get_UTF8();
+        #        bytes = utf8.GetBytes(_file);
+        #
+        #        ftpWebRequest = this.createWebRequest(this.fullFileURL(_fileName));
+        #        ftpWebRequest.set_ContentLength(bytes.get_Length());
+        #        ftpWebRequest.set_Method(SCH_FTPClient::getMethodUploadFile());
+        #
+        #        requestStream = ftpWebRequest.GetRequestStream();
+        #        requestStream.Write(bytes,0,bytes.get_Length());
+        #        requestStream.Close();
+        #
+        #        ftpSize   = this.sizeFile(_fileName);
+        #        localSize = bytes.get_Length();
+        #
+        #        if (ftpSize != localSize)
+        #        {
+        #            error(strFmt("Size origin file %1 = %2 does not match with sent data in size %3", _fileName, ftpSize, strLen(_file) ));
+        #            throw Exception::Error;
+        #        }
+        #
+        #        requestStream = null;
+        #        bytes         = null;
+        #        utf8          = null;
+        #        ftpWebRequest.Abort();
+        #
+        #    }
+        #    catch (Exception::CLRError)
+        #    {
+        #        if (i >= 10)
+        #            warning(strFmt("File %1 %2", _fileName, AifUtil::getClrErrorMessage()));
+        #        else
+        #        {   sleep(1000);
+        #            i++;
+        #            retry;
+        #        }
+        #    }
+        #    catch (Exception::Error)
+        #    {
+        #
+        #        requestStream = null;
+        #        bytes         = null;
+        #        utf8          = null;
+        #        if (ftpWebRequest)
+        #            ftpWebRequest.Abort();
+        #
+        #        warning(strFmt("File %1 does not upload!", _fileName));
+        #    }
+        #
+        #    new InteropPermission(InteropKind::ClrInterop).demand();
+        #
+        #    return;
+        #}
+      ENDSOURCE
+      SOURCE #sizeFile
+        #int64 sizeFile(Notes _fileName)
+        #{
+        #    System.Net.FtpWebRequest    ftpWebRequest;
+        #    System.Net.FtpWebResponse   response;
+        #    int                         i;
+        #    int64                       ret;
+        #    ;
+        #
+        #    new InteropPermission(InteropKind::ClrInterop).assert();
+        #
+        #    try
+        #    {
+        #        ftpWebRequest = this.createWebRequest(this.fullFileURL(_fileName));
+        #        ftpWebRequest.set_Method(SCH_FTPClient::getMethodSizeFile());
+        #
+        #        response = ftpWebRequest.GetResponse();
+        #
+        #        ret = response.get_ContentLength();
+        #
+        #        response.Close();
+        #        ftpWebRequest.Abort();
+        #    }
+        #    catch (exception::CLRError)
+        #    {
+        #        if (i >= 10)
+        #            warning(strFmt("File %1 %2", _fileName, AifUtil::getClrErrorMessage()));
+        #        else
+        #        {   sleep(1000);
+        #            i++;
+        #            retry;
+        #        }
+        #    }
+        #
+        #    new InteropPermission(InteropKind::ClrInterop).demand();
+        #
+        #    return ret;
+        #}
+      ENDSOURCE
+      SOURCE #getMethodDeleteFile
+        #//Delete file
+        #static str getMethodDeleteFile()
+        #{
+        #    #define.retr ("DELE")
+        #    ;
+        #    return #retr;
+        #}
+      ENDSOURCE
+      SOURCE #getMethodDounloadFile
+        #//Short listing of the files
+        #static str getMethodDounloadFile()
+        #{
+        #    #define.retr ("RETR")
+        #    ;
+        #    return #retr;
+        #}
+      ENDSOURCE
+      SOURCE #getMethodShortListFiles
+        #//Short listing of the files
+        #static str getMethodShortListFiles()
+        #{
+        #    #define.nlst ("NLST")
+        #    ;
+        #    return #nlst;
+        #}
+      ENDSOURCE
+      SOURCE #getMethodSizeFile
+        #//Size file
+        #static str getMethodSizeFile()
+        #{
+        #    #define.retr ("SIZE")
+        #    ;
+        #    return #retr;
+        #}
+      ENDSOURCE
+      SOURCE #getMethodUploadFile
+        #//Upload file to ftp server
+        #static str getMethodUploadFile()
+        #{
+        #    #define.retr ("STOR")
+        #    ;
+        #    return #retr;
+        #}
+      ENDSOURCE
+    ENDMETHODS
+  ENDCLASS
+
+***Element: END
